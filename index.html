@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Grand Prix 3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{color-scheme:dark;--bg:#0b0e13;--ink:#f3f5f8;--mut:#8d96a5;--line:#252b36;--acc:#e10600}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#0b0e13}}
+:root[data-theme="dark"]{--bg:#0b0e13}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:"Arial Narrow","Helvetica Neue",Arial,sans-serif;overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#menu,#end{position:fixed;inset:0;overflow:auto;box-sizing:border-box;padding:calc(env(safe-area-inset-top,0px) + 18px) 16px calc(env(safe-area-inset-bottom,0px) + 18px);background:linear-gradient(rgba(11,14,19,.55),rgba(11,14,19,.9))}
+#menu>*{max-width:640px;margin-left:auto;margin-right:auto}
+h1{font-size:clamp(34px,9vw,60px);font-style:italic;font-weight:800;letter-spacing:-.03em;margin:0 auto 6px;line-height:1}
+#help{color:var(--mut);font-size:15px;line-height:1.45;margin-bottom:14px}
+.team{display:flex;align-items:center;gap:10px;border-left:6px solid;margin:8px auto;background:rgba(20,25,33,.85);padding:8px 10px}
+.team span{flex:1 1 90px;font-weight:700;font-size:17px}
+.team button{flex:2 1 120px;font:inherit;font-size:15px;color:var(--ink);background:#1a2029;border:2px solid var(--line);padding:10px 8px;text-align:left;cursor:pointer;min-height:44px}
+.team button.on{border-color:var(--ink);background:#2a3240}
+.team button:focus-visible{outline:3px solid #fff}
+#foot{color:var(--mut);font-size:13px;margin-top:14px}
+#hud{position:fixed;inset:0;pointer-events:none;font-variant-numeric:tabular-nums;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+#tl{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:14px;display:flex;flex-direction:column;gap:2px;font-size:18px;text-shadow:0 1px 4px #000}
+#pos{font-size:34px;font-style:italic}
+#spd{position:absolute;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 1px 6px #000}
+#kmh{font-size:56px;font-style:italic}
+#spd small{font-size:16px;margin-left:6px}
+#gr{display:block;font-size:18px;font-style:normal;color:var(--mut)}
+#big{position:absolute;top:38%;width:100%;text-align:center;font-size:clamp(60px,20vw,140px);font-style:italic;font-weight:800;text-shadow:0 2px 12px #000}
+#end{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:20px;gap:6px;background:rgba(11,14,19,.88)}
+#end h2{font-size:48px;font-style:italic;margin:0}
+#end button{margin-top:14px;font:inherit;font-size:18px;padding:12px 24px;background:var(--acc);color:#fff;border:0;cursor:pointer}
+</style></head><body>
+<div id="hud" hidden>
+ <div id="tl"><b id="pos"></b><span id="lap"></span><span id="tm"></span><span id="bs"></span></div>
+ <div id="spd"><b id="kmh">0</b><small>km/h</small><i id="gr"></i></div>
+ <div id="big"></div>
+</div>
+<div id="menu"><h1>Grand Prix 3D</h1>
+<div id="help">Controller: linker Stick lenken, RT Gas, LT Bremse. Im Menü Steuerkreuz wählen, A startet.<br>Tastatur: Pfeile oder WASD, Enter startet. Drei Runden, zehn Gegner.</div>
+<div id="list"></div>
+<div id="foot">Inoffizielles Fan-Projekt ohne Logos. Die Fahrerliste ist der Stand nach bestem Wissen und kann vom aktuellen Feld abweichen.</div></div>
+<div id="end" hidden></div>
+<script src="three.min.js"></script>
+<script>
+const TEAMS=[
+["Mercedes","#27F4D2",["George Russell",63],["Kimi Antonelli",12]],
+["Ferrari","#E8002D",["Charles Leclerc",16],["Lewis Hamilton",44]],
+["McLaren","#FF8000",["Lando Norris",1],["Oscar Piastri",81]],
+["Red Bull","#3671C6",["Max Verstappen",3],["Isack Hadjar",6]],
+["Williams","#64C4FF",["Alex Albon",23],["Carlos Sainz",55]],
+["Aston Martin","#229971",["Fernando Alonso",14],["Lance Stroll",18]],
+["Alpine","#FF87BC",["Pierre Gasly",10],["Franco Colapinto",43]],
+["Racing Bulls","#6692FF",["Liam Lawson",30],["Arvid Lindblad",41]],
+["Haas","#B6BABD",["Esteban Ocon",31],["Oliver Bearman",87]],
+["Audi","#A50021",["Nico Hülkenberg",27],["Gabriel Bortoleto",5]],
+["Cadillac","#BFA46F",["Sergio Pérez",11],["Valtteri Bottas",77]]];
+const ALL=[];TEAMS.forEach(t=>t.slice(2).forEach(d=>ALL.push({team:t[0],c:t[1],name:d[0],num:d[1]})));
+const LAPS=3,N=360,W=18;
+const $=id=>document.getElementById(id);
+let sel=0,running=false,endShown=false,btns=[];
+
+/* Menü */
+TEAMS.forEach(t=>{const row=document.createElement('div');row.className='team';row.style.borderColor=t[1];
+ row.innerHTML='<span>'+t[0]+'</span>';
+ t.slice(2).forEach(d=>{const i=btns.length,b=document.createElement('button');b.textContent=d[1]+'  '+d[0];b.onclick=()=>{sel=i;start(i)};btns.push(b);row.appendChild(b)});
+ $('list').appendChild(row)});
+function hl(){btns.forEach((b,i)=>b.classList.toggle('on',i==sel));btns[sel].scrollIntoView({block:'nearest'})}
+function mv(d){sel=(sel+d+btns.length)%btns.length;hl()}
+function act(){if(endShown){endShown=false;$('end').hidden=true;$('menu').hidden=false}else start(sel)}
+hl();
+
+/* Szene */
+const R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));document.body.prepend(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x9cc3e6);S.fog=new THREE.Fog(0x9cc3e6,220,950);
+const C=new THREE.PerspectiveCamera(70,1,.5,1500);
+function rs(){R.setSize(innerWidth,innerHeight);C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix()}addEventListener('resize',rs);rs();
+S.add(new THREE.HemisphereLight(0xffffff,0x4a6b3a,.95));
+const sun=new THREE.DirectionalLight(0xffffff,.7);sun.position.set(120,220,60);S.add(sun);
+const gr=new THREE.Mesh(new THREE.PlaneGeometry(6000,6000),new THREE.MeshLambertMaterial({color:0x3f7a3a}));gr.rotation.x=-Math.PI/2;S.add(gr);
+
+/* Strecke */
+const pts=[];for(let i=0;i<14;i++){const a=i/14*Math.PI*2,r=300+80*Math.sin(3*a)+45*Math.cos(5*a+1);pts.push(new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r))}
+const curve=new THREE.CatmullRomCurve3(pts,true,'centripetal');curve.arcLengthDivisions=1200;
+const LEN=curve.getLength(),P=[],T=[];
+for(let i=0;i<N;i++){P.push(curve.getPointAt(i/N));T.push(curve.getTangentAt(i/N))}
+function ribbon(o1,o2,y,cf){const pos=[],col=[],idx=[];
+ for(let i=0;i<N;i++){const p=P[i],t=T[i],nx=-t.z,nz=t.x,c=cf(i);pos.push(p.x+nx*o1,y,p.z+nz*o1,p.x+nx*o2,y,p.z+nz*o2);col.push(...c,...c)}
+ for(let i=0;i<N;i++){const a=i*2,b=((i+1)%N)*2;idx.push(a,a+1,b,a+1,b+1,b)}
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));g.setIndex(idx);g.computeVertexNormals();
+ S.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide})))}
+const curb=i=>i%6<3?[.9,.1,.1]:[.95,.95,.95];
+ribbon(-W/2,W/2,.05,i=>[.22,.23,.26]);ribbon(W/2,W/2+1.6,.06,curb);ribbon(-W/2-1.6,-W/2,.06,curb);
+const line=new THREE.Mesh(new THREE.BoxGeometry(W,.05,2),new THREE.MeshLambertMaterial({color:0xffffff}));line.position.set(P[0].x,.08,P[0].z);line.rotation.y=Math.atan2(T[0].x,T[0].z);S.add(line);
+const tg=new THREE.ConeGeometry(5,16,6),tm=new THREE.MeshLambertMaterial({color:0x2f5d32});
+for(let k=0;k<170;k++){const x=(Math.random()-.5)*1500,z=(Math.random()-.5)*1500;if(P.some(p=>(p.x-x)**2+(p.z-z)**2<1800))continue;const t=new THREE.Mesh(tg,tm);t.position.set(x,8,z);S.add(t)}
+
+/* Auto */
+function makeCar(color){const g=new THREE.Group(),m=new THREE.MeshLambertMaterial({color}),k=new THREE.MeshLambertMaterial({color:0x111111});
+ const add=(geo,mat,x,y,z)=>{const o=new THREE.Mesh(geo,mat);o.position.set(x,y,z);g.add(o);return o};
+ add(new THREE.BoxGeometry(1.1,.5,3.2),m,0,.55,0);add(new THREE.BoxGeometry(.5,.3,1.8),m,0,.45,2.3);
+ add(new THREE.BoxGeometry(1.7,.4,1.5),m,0,.45,-.3);add(new THREE.BoxGeometry(2.2,.08,.6),k,0,.22,3.1);
+ add(new THREE.BoxGeometry(1.8,.5,.1),k,0,1.1,-2.1);add(new THREE.SphereGeometry(.22,10,8),new THREE.MeshLambertMaterial({color:0xffffff}),0,.95,.2);
+ [[1.05,.38,1.7],[-1.05,.38,1.7],[1.1,.4,-1.6],[-1.1,.4,-1.6]].forEach(w=>{const o=add(new THREE.CylinderGeometry(.38,.38,.5,14),k,...w);o.rotation.z=Math.PI/2});
+ return g}
+
+/* Eingabe */
+const K={};
+addEventListener('keydown',e=>{K[e.code]=1;if(e.code.startsWith('Arrow'))e.preventDefault();
+ if(!running){if(e.code=='ArrowUp')mv(-1);if(e.code=='ArrowDown')mv(1);if(e.code=='Enter')act()}});
+addEventListener('keyup',e=>K[e.code]=0);
+function pad(){const a=navigator.getGamepads?navigator.getGamepads():[];for(const g of a)if(g)return g;return null}
+function input(){let gas=0,brk=0,st=0;
+ if(K.ArrowUp||K.KeyW)gas=1;if(K.ArrowDown||K.KeyS)brk=1;if(K.ArrowLeft||K.KeyA)st-=1;if(K.ArrowRight||K.KeyD)st+=1;
+ const g=pad();if(g){const ax=g.axes[0]||0;if(Math.abs(ax)>.08)st=ax;gas=Math.max(gas,g.buttons[7]?g.buttons[7].value:0);brk=Math.max(brk,g.buttons[6]?g.buttons[6].value:0)}
+ return{gas,brk,st}}
+let pv={up:0,dn:0,a:0};
+function menuNav(){const g=pad();if(!g)return;const up=(g.buttons[12]&&g.buttons[12].pressed)||g.axes[1]<-.6,dn=(g.buttons[13]&&g.buttons[13].pressed)||g.axes[1]>.6,a=g.buttons[0]&&g.buttons[0].pressed;
+ if(endShown){if(a&&!pv.a)act()}else{if(up&&!pv.up)mv(-1);if(dn&&!pv.dn)mv(1);if(a&&!pv.a)act()}pv={up,dn,a}}
+
+/* Rennen */
+let me,p,ais=[],cd=0,rt=0;
+const fmt=t=>t==null?'--':Math.floor(t/60)+':'+(t%60).toFixed(3).padStart(6,'0');
+function start(i){const d=ALL[i];sel=i;$('menu').hidden=true;$('end').hidden=true;endShown=false;$('hud').hidden=false;
+ if(me)S.remove(me);me=makeCar(d.c);S.add(me);ais.forEach(a=>S.remove(a.m));
+ ais=ALL.filter((_,j)=>j!=i).filter((_,k)=>k%2==0).slice(0,10).map((o,k)=>{const m=makeCar(o.c);S.add(m);return{m,u:14+k*12,v:53+Math.random()*7,off:(k%2?-1:1)*4.5}});
+ p={x:P[0].x,z:P[0].z,h:Math.atan2(T[0].x,T[0].z),v:0,idx:0,prog:0,dist:0,laps:0,ls:0,best:null};
+ cd=3.2;rt=0;running=true;pad()&&0}
+function finish(){running=false;endShown=true;const pos=1+ais.filter(a=>a.u>LAPS*LEN).length;
+ const e=$('end');e.hidden=false;e.innerHTML='<h2>Ziel</h2><div>Platz '+pos+' von '+(ais.length+1)+'</div><div>Zeit '+fmt(rt)+'</div><div>Beste Runde '+fmt(p.best)+'</div><button onclick="act()">Neues Rennen</button>';$('hud').hidden=true}
+function nearest(){let b=1e12,bi=p.idx;for(let k=-25;k<=25;k++){const i=(p.idx+k+N)%N,dx=P[i].x-p.x,dz=P[i].z-p.z,d=dx*dx+dz*dz;if(d<b){b=d;bi=i}}
+ let d=bi-p.idx;if(d<-N/2)d+=N;if(d>N/2)d-=N;p.idx=bi;p.prog+=d;p.dist=Math.sqrt(b)}
+function update(dt){
+ let inp={gas:0,brk:0,st:0};
+ if(cd>0){cd-=dt;$('big').textContent=cd>0?Math.ceil(cd):'';if(cd<=0){$('big').textContent='GO';setTimeout(()=>$('big').textContent='',900)}}
+ else{inp=input();rt+=dt}
+ p.v=Math.max(0,p.v+(inp.gas*(p.v<30?38:26)-inp.brk*55-.0035*p.v*p.v-2)*dt);
+ if(p.dist>W/2+1.6&&p.v>28)p.v-=45*dt;
+ p.v*=1-.15*Math.abs(inp.st)*dt;
+ p.h-=inp.st*(1.9-p.v/90)*Math.min(1,p.v/12)*dt;
+ p.x+=Math.sin(p.h)*p.v*dt;p.z+=Math.cos(p.h)*p.v*dt;
+ nearest();
+ me.position.set(p.x,0,p.z);me.rotation.y=p.h;
+ const done=Math.floor(p.prog/N);
+ if(done>p.laps){const lt=rt-p.ls;p.ls=rt;p.laps=done;p.best=p.best==null?lt:Math.min(p.best,lt);if(done>=LAPS){finish();return}}
+ if(cd<=0)ais.forEach(a=>{a.u+=a.v*dt});
+ ais.forEach(a=>{const f=(((a.u/LEN)%1)+1)%1,q=curve.getPointAt(f),t=curve.getTangentAt(f);a.m.position.set(q.x-t.z*a.off,0,q.z+t.x*a.off);a.m.rotation.y=Math.atan2(t.x,t.z)});
+ const fx=Math.sin(p.h),fz=Math.cos(p.h),k=1-Math.pow(.0005,dt);
+ C.position.x+=(p.x-fx*9-C.position.x)*k;C.position.y+=(4.3-C.position.y)*k;C.position.z+=(p.z-fz*9-C.position.z)*k;
+ C.lookAt(p.x+fx*10,1.2,p.z+fz*10);C.fov=68+p.v/90*14;C.updateProjectionMatrix();
+ const pm=p.prog*LEN/N,pos=1+ais.filter(a=>a.u>pm).length;
+ $('pos').textContent='P'+pos+'/'+(ais.length+1);$('lap').textContent='Runde '+Math.min(p.laps+1,LAPS)+'/'+LAPS;
+ $('tm').textContent='Zeit '+fmt(rt);$('bs').textContent='Beste '+fmt(p.best);
+ $('kmh').textContent=Math.round(p.v*3.6);$('gr').textContent='Gang '+Math.min(8,1+Math.floor(p.v/12))}
+
+let last=performance.now();
+function loop(now){requestAnimationFrame(loop);const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(running)update(dt);else{menuNav();const a=now*.00008;C.position.set(Math.cos(a)*520,170,Math.sin(a)*520);C.fov=60;C.updateProjectionMatrix();C.lookAt(0,0,0)}
+ R.render(S,C)}
+requestAnimationFrame(loop);
+</script></body></html>
